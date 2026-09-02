@@ -4,7 +4,7 @@ import threading,os,uuid
 import pytesseract
 import threading,os
 from PIL import Image
-import cv2,easyocr
+import cv2
 from dotenv import load_dotenv
 import datetime
 
@@ -228,11 +228,12 @@ def execution(inputImg,startingTime,doc_data,docType):
                     # cropped_image.save(imgCropped)
 
                     reader = model_loader.get_ocr_reader()
-                    result = reader.readtext(np.array(cropped_image), detail=0)
-                    if not result:
+                    field_text = reader.image_to_string(np.array(cropped_image), config="--psm 6")
+                    if not field_text.strip():
                         print(f"[EXTRACTION][{jKey}] field crop OCR empty, falling back to full image OCR")
-                        result = reader.readtext(np.array(imageResized), detail=0)
+                        field_text = reader.image_to_string(np.array(imageResized), config="--psm 6")
 
+                    result = [line.strip() for line in field_text.splitlines() if line.strip()]
                     print(f"[EXTRACTION][{jKey}] raw OCR result: {result}")
                     final_data = " ".join(result)
                     if final_data.strip():
@@ -240,7 +241,8 @@ def execution(inputImg,startingTime,doc_data,docType):
 
                 if not jsonData:
                     print(f"[EXTRACTION] No valid mapped OCR fields extracted. mainLt={mainLt}, labelName={labelName}")
-                    print(f"[EXTRACTION] Full-image OCR fallback text: {model_loader.get_ocr_reader().readtext(np.array(imageResized), detail=0)}")
+                    full_text = model_loader.get_ocr_reader().image_to_string(np.array(imageResized), config="--psm 6")
+                    print(f"[EXTRACTION] Full-image OCR fallback text: {full_text}")
                     return({"message":"Model couldn't able to extract the text.","type":predictedClass})
 
                 print(f"[EXTRACTION] extracted jsonData before post-processing: {jsonData}")

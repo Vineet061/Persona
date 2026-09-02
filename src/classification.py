@@ -5,9 +5,9 @@ import threading
 import uuid
 
 import cv2
-import easyocr
 import matplotlib.pyplot as plt
 import numpy as np
+import pytesseract
 from tensorflow.keras.models import load_model
 from tensorflow.keras.utils import img_to_array
 from ultralytics import YOLO
@@ -75,14 +75,12 @@ class ModelLoader:
         self._load_ocr_reader()
 
     def _load_ocr_reader(self):
-        """Initializes EasyOCR once (like the other models) instead of per-field, per-request."""
-        try:
-            logger.info("Loading EasyOCR reader...")
-            self.ocr_reader = easyocr.Reader(['en'])
-            logger.info("EasyOCR reader loaded")
-        except Exception as e:
-            logger.error(f"Failed to load EasyOCR reader: {e}")
-            self.ocr_reader = None
+        """Initialize Tesseract OCR configuration for the process."""
+        tesseract_path = os.environ.get("tesseractPath")
+        if tesseract_path:
+            pytesseract.pytesseract.tesseract_cmd = tesseract_path
+        self.ocr_reader = pytesseract
+        logger.info("Tesseract OCR configured")
 
     def get_ocr_reader(self):
         if self.ocr_reader is None:
@@ -191,11 +189,11 @@ class ModelLoader:
                 f"threshold={BLUR_THRESHOLD})"
             )
 
-        img_array = img_to_array(img)
-        # img_array = tf.expand_dims(img_array, 0)
+        img_array = img_to_array(img).astype("float32")
+        img_array = np.expand_dims(img_array, axis=0)
 
-        # Predict
-        predictions = model.predict(img_array)
+        # Predict using a batch-shaped input, matching Keras Sequential expectations.
+        predictions = model.predict(img_array, verbose=0)
         predicted_class = classes[np.argmax(predictions[0])]
         confidence = round(100 * (np.max(predictions[0])), 2)
 

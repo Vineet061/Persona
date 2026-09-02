@@ -4,9 +4,8 @@ pillow
 flask-cors
 python-dotenv
 numpy
-easyocr
 matplotlib
 pytesseract
 tensorflow
 requests
-pdfplumber
+
