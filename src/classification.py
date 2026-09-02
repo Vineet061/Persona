@@ -8,7 +8,6 @@ import cv2
 import easyocr
 import matplotlib.pyplot as plt
 import numpy as np
-import tensorflow as tf
 from tensorflow.keras.models import load_model
 from tensorflow.keras.utils import img_to_array
 from ultralytics import YOLO
@@ -193,7 +192,7 @@ class ModelLoader:
             )
 
         img_array = img_to_array(img)
-        img_array = tf.expand_dims(img_array, 0)
+        # img_array = tf.expand_dims(img_array, 0)
 
         # Predict
         predictions = model.predict(img_array)

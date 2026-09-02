@@ -1,12 +1,8 @@
 
-from src.retraining import *
 from src.classification import *
 from src.execution import *
-from src.retraining import *
 from src.dataManager import *
-from src.faceDetection import *
 from src.security import validate_url
-from src.graph import run
 
 from pathlib import Path
 import requests
@@ -20,43 +16,8 @@ OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "outputs")
 
 
 
-import pika, json
+import json
 
-# RABBITMQ_HOST = "93.114.57.34"
-# RABBITMQ_USER = "bxsports"
-# RABBITMQ_PASS = "bxsports"
-# RESULT_QUEUE = "bxsports.file.extraction.result"
-
-# def publish_result(payload):
-#     credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
-#     connection = pika.BlockingConnection(
-#         pika.ConnectionParameters(RABBITMQ_HOST, 5672, '/', credentials,
-#                                   heartbeat=30, blocked_connection_timeout=30)
-#     )
-#     try:
-#         channel = connection.channel()
-#         channel.queue_declare(queue=RESULT_QUEUE, durable=True)
-#         channel.basic_publish(
-#             exchange='',
-#             routing_key=RESULT_QUEUE,
-#             body=json.dumps(payload),
-#             properties=pika.BasicProperties(
-#                 delivery_mode=2,              # persist to disk
-#                 content_type='application/json'
-#             )
-#         )
-#     finally:
-#         connection.close()
-
-
-
-
-
-# @celery.task(name="task.simpleRetraining",bind=True) 
-# def simpleRetraining(self,imgPath,className,threshold):
-#     batchData(imgPath,className,threshold)
-#     print("Debug22")
-    
 
 
 # @celery.task(name="task.Extraction",bind=True) 

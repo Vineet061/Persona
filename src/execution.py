@@ -1,4 +1,3 @@
-import matplotlib.pyplot as plt
 from src.classification import *
 
 import threading,os,uuid
