@@ -32,7 +32,6 @@ imgDummy = os.environ.get("rawImage")
 imgCropped = os.environ.get("croppedImage")
 labeledImgPath = os.environ.get("imgBBPath")
 labeledFoldPath = os.environ.get("foldPath")
-portNumber = os.environ.get("portNum")
 popplerPath = os.environ.get("popplerRootPath")
 
 logging.basicConfig(level=logging.INFO,
@@ -145,5 +144,5 @@ def upload_datda():
 
 if __name__ == "__main__":
     docManager()
-    port = int(os.environ.get("PORT") or 9988)
-    app.run(host="0.0.0.0", debug=False, port=port)
+    # port = int(os.environ.get("PORT") or 9988)
+    app.run(host="0.0.0.0", debug=False)
