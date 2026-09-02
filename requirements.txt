@@ -8,7 +8,7 @@ opencv-python-headless
 easyocr
 matplotlib
 pytesseract
-tensorflow==2.19.0
+tensorflow
 Augmentor
 celery
 requests
