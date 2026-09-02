@@ -145,7 +145,7 @@ def upload_datda():
 
 if __name__ == "__main__":
     docManager()
-    port = int(portNumber or 9988)
+    port = int(9988)
     print("\n  UI      ->  http://127.0.0.1:{}".format(port))
     print("  Health  ->  http://127.0.0.1:{}/api/health\n".format(port))
     app.run(host="0.0.0.0", debug=False, port=port)
