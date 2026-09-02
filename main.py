@@ -145,4 +145,5 @@ def upload_datda():
 
 if __name__ == "__main__":
     docManager()
-    app.run(host="0.0.0.0", debug=False, port=9988)
+    port = int(os.environ.get("PORT") or 9988)
+    app.run(host="0.0.0.0", debug=False, port=port)
