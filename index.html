@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Persona — identity verification</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Public+Sans:wght@400;500;600&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#101B2E; --ink-2:#3A4A63; --ink-3:#6B7C95;
+  --paper:#EAEEF3; --card:#FFFFFF;
+  --rule:#D2DAE5; --rule-soft:#E4E9F0;
+  --uv:#5B45E0; --uv-soft:#EFECFD;
+  --pass:#0B7A5C; --pass-soft:#E4F3EE;
+  --fail:#B3271E; --fail-soft:#FBEAE8;
+  --amber:#9A5B00; --amber-soft:#FBF0DE;
+  --shadow:0 1px 2px rgba(16,27,46,.06), 0 8px 24px -12px rgba(16,27,46,.18);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--paper);color:var(--ink);
+  font-family:"Public Sans",system-ui,sans-serif;font-size:15px;line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{font-family:"Archivo",system-ui,sans-serif;margin:0;letter-spacing:-.02em}
+button,input,select{font:inherit;color:inherit}
+
+/* header */
+.topbar{background:var(--ink);color:#fff;border-bottom:3px solid var(--uv)}
+.topbar-in{max-width:1240px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.mark{display:flex;align-items:baseline;gap:10px}
+.mark h1{font-size:19px;font-weight:700;color:#fff}
+.mark span{font-size:12.5px;color:#93A3BC}
+.spacer{flex:1}
+.endpoint{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);border-radius:7px;padding:5px 10px}
+.endpoint label{font-size:12px;color:#93A3BC}
+.endpoint input{background:transparent;border:0;outline:none;color:#fff;font-family:"Roboto Mono",monospace;font-size:12.5px;width:210px}
+.endpoint input::placeholder{color:#5E6E88}
+
+/* layout */
+.wrap{max-width:1240px;margin:0 auto;padding:28px 24px 72px}
+.grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(340px,.95fr);gap:24px;align-items:start}
+.panel{background:var(--card);border:1px solid var(--rule);border-radius:12px;box-shadow:var(--shadow)}
+.panel-head{padding:14px 18px;border-bottom:1px solid var(--rule-soft);display:flex;align-items:center;gap:10px}
+.panel-head h2{font-size:14.5px;font-weight:600}
+.panel-head .hint{font-size:12.5px;color:var(--ink-3);margin-left:auto;font-family:"Roboto Mono",monospace}
+.panel-body{padding:18px}
+
+/* viewer */
+.viewer{position:relative;background:var(--ink);border-radius:12px 12px 0 0;overflow:hidden;aspect-ratio:16/10}
+.viewer img{width:100%;height:100%;object-fit:contain;display:block}
+.viewer-empty{
+  position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:10px;text-align:center;padding:24px;color:#7688A3;
+  background:repeating-linear-gradient(115deg,rgba(255,255,255,.032) 0 1px,transparent 1px 9px),
+             repeating-linear-gradient(-115deg,rgba(255,255,255,.032) 0 1px,transparent 1px 9px);
+}
+.viewer-empty strong{color:#C3CEDE;font-family:"Archivo";font-weight:600;font-size:15px}
+.viewer-empty p{margin:0;font-size:13px;max-width:36ch;line-height:1.5}
+.pdfbadge{
+  font-family:"Roboto Mono",monospace;font-size:11px;color:#C3CEDE;
+  border:1px solid rgba(255,255,255,.22);border-radius:4px;padding:3px 8px;
+}
+.scan{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .3s}
+.scan.on{opacity:1}
+.scan::before{
+  content:"";position:absolute;left:0;right:0;height:120px;top:-120px;
+  background:linear-gradient(180deg,transparent,rgba(91,69,224,.30) 62%,rgba(160,142,255,.85));
+  box-shadow:0 0 26px 6px rgba(91,69,224,.45);
+  animation:sweep 1.9s cubic-bezier(.45,0,.55,1) infinite;
+}
+@keyframes sweep{0%{top:-120px}100%{top:100%}}
+.bbox{position:absolute;border:1.5px solid var(--uv);border-radius:2px;background:rgba(91,69,224,.10);opacity:0;transform:scale(.97);transition:opacity .28s,transform .28s}
+.bbox.on{opacity:1;transform:scale(1)}
+.bbox b{position:absolute;top:-19px;left:-1.5px;background:var(--uv);color:#fff;font-family:"Roboto Mono",monospace;font-size:10.5px;font-weight:500;padding:1px 5px;border-radius:2px 2px 0 0;white-space:nowrap}
+
+.mrz{background:#0B1424;border-top:1px solid rgba(255,255,255,.09);padding:11px 16px;overflow-x:auto}
+.mrz code{font-family:"Roboto Mono",monospace;font-size:12.5px;letter-spacing:.06em;color:#8FA0BC;display:block;white-space:pre}
+.mrz code.live{color:#B9AEFF}
+
+.statusbar{display:flex;align-items:center;gap:10px;padding:12px 18px;border-top:1px solid var(--rule-soft);font-size:13.5px;color:var(--ink-2)}
+.pip{width:9px;height:9px;border-radius:50%;flex:none;background:var(--rule);transition:background .2s,box-shadow .2s}
+.pip.run{background:var(--uv);box-shadow:0 0 0 4px var(--uv-soft);animation:pulse 1.1s ease-in-out infinite}
+.pip.ok{background:var(--pass);box-shadow:0 0 0 4px var(--pass-soft)}
+.pip.bad{background:var(--fail);box-shadow:0 0 0 4px var(--fail-soft)}
+@keyframes pulse{50%{opacity:.35}}
+
+/* form */
+.field{margin-bottom:15px}
+.field:last-child{margin-bottom:0}
+.field label{display:block;font-size:13px;font-weight:600;margin-bottom:6px}
+.field input,.field select{width:100%;padding:9px 11px;border:1px solid var(--rule);border-radius:8px;background:#fff;outline:none;transition:border-color .12s,box-shadow .12s}
+.field input:focus,.field select:focus{border-color:var(--uv);box-shadow:0 0 0 3px var(--uv-soft)}
+.field input.err{border-color:var(--fail);background:var(--fail-soft)}
+.field .msg{font-size:12.5px;color:var(--fail);margin-top:5px;display:none}
+.field .msg.on{display:block}
+
+.btn{width:100%;padding:11px 16px;border:0;border-radius:8px;background:var(--uv);color:#fff;font-family:"Archivo";font-weight:600;font-size:14.5px;cursor:pointer;transition:background .13s}
+.btn:hover{background:#4A35CC}
+.btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.btn:disabled{background:#B7B0E8;cursor:not-allowed}
+.btn.ghost{background:transparent;color:var(--ink-2);border:1px solid var(--rule);margin-top:9px}
+.btn.ghost:hover{background:var(--paper)}
+
+/* result */
+.verdict{display:flex;align-items:center;gap:13px;padding:14px 16px;border-radius:10px;border:1px solid;margin-bottom:16px}
+.verdict .seal{width:42px;height:42px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;border:2px solid currentColor;font-size:19px}
+.verdict h3{font-size:15.5px;font-weight:700;margin-bottom:1px}
+.verdict p{margin:0;font-size:13px;opacity:.85}
+.verdict.pass{color:var(--pass);background:var(--pass-soft);border-color:#A9D8C9}
+.verdict.fail{color:var(--fail);background:var(--fail-soft);border-color:#EBBEBA}
+.verdict.wait{color:var(--amber);background:var(--amber-soft);border-color:#E8D3AC}
+
+.kv{width:100%;border-collapse:collapse;font-size:13.5px}
+.kv tr{border-bottom:1px solid var(--rule-soft)}
+.kv tr:last-child{border-bottom:0}
+.kv th{text-align:left;font-weight:500;color:var(--ink-3);padding:9px 12px 9px 0;white-space:nowrap;width:44%;vertical-align:top}
+.kv td{padding:9px 0;font-weight:500;font-family:"Roboto Mono",monospace;font-size:12.5px;word-break:break-word}
+.kv td.blank{color:var(--ink-3);font-family:"Public Sans";font-style:italic}
+.kv .grouphead th{padding-top:16px;font-family:"Archivo";font-weight:600;color:var(--ink);font-size:12.5px}
+
+.score{display:flex;align-items:center;gap:11px;margin-top:16px;padding-top:15px;border-top:1px solid var(--rule-soft)}
+.bar{flex:1;height:7px;border-radius:4px;background:var(--rule-soft);overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--pass);border-radius:4px;transition:width .7s cubic-bezier(.2,.7,.3,1)}
+.score b{font-family:"Roboto Mono",monospace;font-size:13px}
+
+.placeholder{color:var(--ink-3);font-size:13.5px;text-align:center;padding:26px 12px;line-height:1.5}
+.alert{border:1px solid #EBBEBA;background:var(--fail-soft);color:var(--fail);border-radius:9px;padding:11px 13px;font-size:13px;margin-bottom:16px}
+.alert code{font-family:"Roboto Mono",monospace;font-size:12px}
+
+details.raw{margin-top:16px;border-top:1px solid var(--rule-soft);padding-top:13px}
+details.raw summary{cursor:pointer;font-size:12.5px;color:var(--ink-3);outline:none}
+details.raw summary:focus-visible{outline:2px solid var(--uv);outline-offset:3px}
+details.raw pre{
+  margin:11px 0 0;background:#0B1424;color:#B9C5D8;border-radius:8px;padding:13px;
+  font-family:"Roboto Mono",monospace;font-size:11.5px;line-height:1.6;
+  overflow:auto;max-height:320px;white-space:pre-wrap;word-break:break-word;
+}
+
+@media (max-width:940px){
+  .grid{grid-template-columns:1fr}
+  .endpoint input{width:150px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="mark"><h1>Persona</h1><span>Identity verification</span></div>
+    <div class="spacer"></div>
+    <div class="endpoint">
+      <label for="base">API</label>
+      <input id="base" value="" placeholder="same origin" spellcheck="false">
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="grid">
+
+    <section class="panel" style="overflow:hidden">
+      <div class="viewer" id="viewer">
+        <img id="preview" alt="" style="display:none">
+        <div class="viewer-empty" id="empty">
+          <strong>No document loaded</strong>
+          <p>Paste the URL of an Aadhaar image or PDF. It previews here before the scan runs.</p>
+        </div>
+        <div class="scan" id="scan"></div>
+        <div class="bbox" id="b1" style="left:6%;top:14%;width:88%;height:72%"><b>document 0.99</b></div>
+        <div class="bbox" id="b3" style="left:36%;top:70%;width:56%;height:15%"><b>text 0.94</b></div>
+      </div>
+      <div class="mrz"><code id="mrz">— no text extracted yet —</code></div>
+      <div class="statusbar"><span class="pip" id="pip"></span><span id="status">Idle</span></div>
+    </section>
+
+    <div style="display:grid;gap:24px">
+
+      <section class="panel">
+        <div class="panel-head"><h2>Verify a document</h2></div>
+        <div class="panel-body">
+          <div class="alert" id="alert" style="display:none"></div>
+
+          <div class="field">
+            <label for="imgLink">Document URL</label>
+            <input id="imgLink" placeholder="https://example.com/aadhaar.jpg" spellcheck="false">
+            <div class="msg" id="imgLinkMsg">Enter a valid http or https URL.</div>
+          </div>
+
+          <div class="field">
+            <label for="docType">Document type</label>
+            <select id="docType">
+              <option value="AADHAAR">Aadhaar</option>
+              <option value="pdf">PDF</option>
+              <option value="PAN">PAN card</option>
+              <option value="PASSPORT">Passport</option>
+            </select>
+          </div>
+
+          <div style="margin-top:18px">
+            <button class="btn" id="go">Start verification</button>
+            <button class="btn ghost" id="reset">Clear</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Result</h2><span class="hint" id="elapsed"></span></div>
+        <div class="panel-body" id="result">
+          <div class="placeholder">Results appear here once a document has been through the pipeline.</div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</main>
+
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+  var timer = null, t0 = 0;
+
+  /* ---------- preview ---------- */
+  function updatePreview(){
+    var u = $("imgLink").value.trim();
+    var ok = /^https?:\/\/\S+$/i.test(u);
+    var isPdf = /\.pdf(\?|$)/i.test(u);
+
+    if(ok && !isPdf){
+      $("preview").src = u;
+      $("preview").style.display = "block";
+      $("empty").style.display = "none";
+    } else {
+      $("preview").style.display = "none";
+      $("empty").style.display = "flex";
+      if(ok && isPdf){
+        $("empty").innerHTML = '<span class="pdfbadge">PDF</span>' +
+          '<strong>PDF document</strong>' +
+          '<p>The first page is rendered on the server. There is no preview here, but the scan runs the same way.</p>';
+      } else {
+        $("empty").innerHTML = '<strong>No document loaded</strong>' +
+          '<p>Paste the URL of an Aadhaar image or PDF. It previews here before the scan runs.</p>';
+      }
+    }
+  }
+  $("imgLink").addEventListener("input", updatePreview);
+  $("imgLink").addEventListener("keydown", function(e){
+    if(e.key === "Enter" && !$("go").disabled) $("go").click();
+  });
+  $("preview").addEventListener("error", function(){
+    this.style.display = "none";
+    $("empty").style.display = "flex";
+    $("empty").innerHTML = '<strong>Image could not be loaded</strong>' +
+      '<p>The URL responded, but not with a viewable image. The server may still be able to read it.</p>';
+  });
+
+  /* ---------- status ---------- */
+  function setStatus(text, kind){
+    $("pip").className = "pip" + (kind ? " " + kind : "");
+    $("status").textContent = text;
+  }
+  function startClock(){
+    t0 = Date.now();
+    clearInterval(timer);
+    timer = setInterval(function(){ $("elapsed").textContent = ((Date.now()-t0)/1000).toFixed(1)+"s"; }, 100);
+  }
+  function stopClock(){ clearInterval(timer); }
+  function busy(on){
+    $("go").disabled = on;
+    $("go").textContent = on ? "Verifying\u2026" : "Start verification";
+    $("scan").classList.toggle("on", on);
+  }
+  function resetVisuals(){
+    ["b1","b3"].forEach(function(b){ $(b).classList.remove("on","pass"); });
+    $("mrz").textContent = "\u2014 no text extracted yet \u2014";
+    $("mrz").classList.remove("live");
+  }
+  function showAlert(html){ $("alert").innerHTML = html; $("alert").style.display = "block"; }
+  function hideAlert(){ $("alert").style.display = "none"; }
+
+  function esc(s){
+    return String(s).replace(/[&<>"]/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];
+    });
+  }
+
+  /* ---------- result rendering ----------
+     execution() can return anything, so nothing here is hardcoded to a
+     fixed schema: known keys get a headline, everything else is listed. */
+
+  var VERDICT_KEYS  = ["status","result","verdict"];
+  var MESSAGE_KEYS  = ["errorMessage","error","message","reason","remark"];
+  var SCORE_KEYS    = ["matchScore","match_score","score","confidence","similarity"];
+  var TEXT_KEYS     = ["rawText","raw_text","text","ocr","extractedText","mrz"];
+  var SKIP          = VERDICT_KEYS.concat(MESSAGE_KEYS, SCORE_KEYS, TEXT_KEYS);
+
+  function pick(obj, keys){
+    for(var i=0;i<keys.length;i++){
+      if(obj && obj[keys[i]] !== undefined && obj[keys[i]] !== null && obj[keys[i]] !== "") {
+        return { key: keys[i], value: obj[keys[i]] };
+      }
+    }
+    return null;
+  }
+
+  function humanize(k){
+    return k.replace(/[_-]+/g," ")
+            .replace(/([a-z0-9])([A-Z])/g,"$1 $2")
+            .replace(/^./, function(c){ return c.toUpperCase(); });
+  }
+
+  function rowsFrom(obj, depth){
+    var html = "";
+    Object.keys(obj).forEach(function(k){
+      if(depth === 0 && SKIP.indexOf(k) > -1) return;
+      var v = obj[k];
+      if(v && typeof v === "object" && !Array.isArray(v)){
+        html += '<tr class="grouphead"><th colspan="2">'+esc(humanize(k))+'</th></tr>';
+        html += rowsFrom(v, depth+1);
+        return;
+      }
+      if(Array.isArray(v)) v = v.join(", ");
+      if(typeof v === "boolean") v = v ? "yes" : "no";
+      var blank = (v === null || v === undefined || v === "");
+      html += '<tr><th>'+esc(humanize(k))+'</th>' +
+              (blank ? '<td class="blank">empty</td>' : '<td>'+esc(v)+'</td>') + '</tr>';
+    });
+    return html;
+  }
+
+  function classify(data){
+    var v = pick(data, VERDICT_KEYS);
+    var s = v ? String(v.value).toLowerCase() : "";
+    if(/fail|reject|error|invalid|not\s*match/.test(s)) return "fail";
+    if(/success|verified|pass|ok|match|true|complete/.test(s)) return "pass";
+    return v ? "wait" : "pass";
+  }
+
+  function render(data){
+    var kind = classify(data);
+    var v    = pick(data, VERDICT_KEYS);
+    var msg  = pick(data, MESSAGE_KEYS);
+    var sc   = pick(data, SCORE_KEYS);
+    var txt  = pick(data, TEXT_KEYS);
+
+    var head = v ? String(v.value) : (kind === "fail" ? "Failed" : "Verified");
+    var seal = kind === "pass" ? "\u2713" : kind === "fail" ? "\u2715" : "\u2022";
+    var sub  = msg ? String(msg.value)
+                   : (kind === "pass" ? "The document was read and checked without a human in the loop."
+                                      : "See the fields below for detail.");
+
+    var body = rowsFrom(data, 0);
+
+    var html =
+      '<div class="verdict '+kind+'"><div class="seal">'+seal+'</div>' +
+      '<div><h3>'+esc(head)+'</h3><p>'+esc(sub)+'</p></div></div>';
+
+    html += body ? '<table class="kv">'+body+'</table>'
+                 : '<div class="placeholder">The response carried no extra fields.</div>';
+
+    if(sc){
+      var n = Number(sc.value);
+      var pct = Math.round(n > 1 ? n : n*100);
+      html += '<div class="score"><span style="font-size:13px;color:var(--ink-3)">'+esc(humanize(sc.key))+'</span>' +
+              '<div class="bar"><i id="barfill"></i></div><b>'+pct+'%</b></div>';
+    }
+
+    html += '<details class="raw"><summary>Raw response</summary><pre>' +
+            esc(JSON.stringify(data, null, 2)) + '</pre></details>';
+
+    $("result").innerHTML = html;
+
+    if(sc){
+      var n2 = Number(sc.value), pct2 = Math.round(n2 > 1 ? n2 : n2*100);
+      requestAnimationFrame(function(){
+        var f = $("barfill");
+        if(f){
+          f.style.width = pct2 + "%";
+          f.style.background = pct2 >= 75 ? "var(--pass)" : pct2 >= 50 ? "#B26A00" : "var(--fail)";
+        }
+      });
+    }
+
+    // Fill the text strip and light up boxes only if the server actually sent text.
+    if(txt){
+      $("mrz").textContent = String(txt.value).slice(0, 600);
+      $("mrz").classList.add("live");
+      $("b1").classList.add("on");
+      $("b3").classList.add("on");
+    }
+
+    setStatus(kind === "fail" ? "Verification failed" : "Complete",
+              kind === "fail" ? "bad" : "ok");
+  }
+
+  /* ---------- submit ---------- */
+  function validate(){
+    var url = $("imgLink").value.trim();
+    var bad = !/^https?:\/\/\S+$/i.test(url);
+    $("imgLink").classList.toggle("err", bad);
+    $("imgLinkMsg").classList.toggle("on", bad);
+    return !bad;
+  }
+
+  function apiBase(){ return $("base").value.trim().replace(/\/+$/,""); }
+
+  $("go").addEventListener("click", function(){
+    hideAlert();
+    if(!validate()) return;
+    resetVisuals();
+    $("result").innerHTML = '<div class="placeholder">Running\u2026</div>';
+    busy(true);
+    startClock();
+    setStatus("Fetching and reading the document", "run");
+    submit();
+  });
+
+  $("reset").addEventListener("click", function(){
+    stopClock(); busy(false); hideAlert(); resetVisuals();
+    $("imgLink").value = "";
+    $("imgLink").classList.remove("err");
+    $("imgLinkMsg").classList.remove("on");
+    $("elapsed").textContent = "";
+    setStatus("Idle");
+    updatePreview();
+    $("result").innerHTML = '<div class="placeholder">Results appear here once a document has been through the pipeline.</div>';
+  });
+
+  /* Work out what went wrong when the reply is not JSON, so the page
+     explains the cause instead of dumping raw HTML at the user. */
+  function diagnose(url, res, txt){
+    var where = "<code>" + esc(url) + "</code>";
+
+    if(/<title>Error response<\/title>/i.test(txt) || /Unsupported method/i.test(txt)){
+      return "That reply came from Python's <code>http.server</code>, not Flask \u2014 it only answers GET, " +
+             "so your POST returned 501. The page is being served by the wrong server. Stop " +
+             "<code>python -m http.server</code>, run Flask, and open the page on Flask's port " +
+             "(usually <code>5000</code>).";
+    }
+    if(res.status === 404){
+      return "No route at " + where + ". Check the API box in the header points at the Flask server, " +
+             "and that the endpoint path matches.";
+    }
+    if(res.status === 405){
+      return where + " exists but rejects POST. Check <code>methods=[\"POST\"]</code> on the route.";
+    }
+    if(res.status >= 500){
+      return "The server raised an error before it could reply with JSON. The traceback is in the " +
+             "terminal running Flask.";
+    }
+    return "Expected JSON from " + where + " but got " + (res.status) + " " +
+           esc((txt || "").trim().slice(0, 120)) + "\u2026";
+  }
+
+  function submit(){
+    var fd = new FormData();                    // route reads request.form
+    fd.append("imgLink", $("imgLink").value.trim());
+    fd.append("docType", $("docType").value);   // ignored until you uncomment it server-side
+
+    var url = apiBase() + "/api/verification";
+    var ctrl = new AbortController();
+    var bail = setTimeout(function(){ ctrl.abort(); }, 120000);
+
+    fetch(url, {
+      method: "POST",
+      body: fd,
+      signal: ctrl.signal,
+      headers: { "Accept": "application/json" }
+    })
+      .then(function(res){
+        return res.text().then(function(txt){
+          try { return JSON.parse(txt); }
+          catch(e){ throw new Error(diagnose(url, res, txt)); }
+        });
+      })
+      .then(function(data){
+        clearTimeout(bail); stopClock(); busy(false);
+        render(data);                           // handles 200-with-status-Failed too
+      })
+      .catch(function(err){
+        clearTimeout(bail); stopClock(); busy(false);
+        setStatus("Request failed", "bad");
+
+        var why;
+        if(err.name === "AbortError"){
+          why = "The request ran past two minutes and was stopped. The document may be very large, " +
+                "or the extractor may be stuck.";
+        } else if(err instanceof TypeError){
+          why = "The browser could not reach <code>" + esc(url) + "</code>. Either the server is not " +
+                "running, or it is on a different origin and CORS is not enabled.";
+        } else {
+          why = err.message;
+        }
+
+        showAlert(why);
+        $("result").innerHTML = '<div class="placeholder">Nothing to show \u2014 the request did not complete.</div>';
+      });
+  }
+
+  updatePreview();
+})();
+</script>
+</body>
+</html>
