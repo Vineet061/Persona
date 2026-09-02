@@ -8,4 +8,4 @@ matplotlib
 pytesseract
 onnxruntime
 requests
-
+pdf2image
