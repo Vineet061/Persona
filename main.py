@@ -1,56 +1,51 @@
-from src.classification import *
-from src.execution import *
-from src.dataManager import *
-from src.security import validate_url
+# from src.classification import *
+# from src.execution import *
+# from src.dataManager import *
+# from src.security import validate_url
 
-import logging
-import json
-import os
-import threading
-import datetime
-from io import BytesIO
+# import logging
+# import json
+# import os
+# import threading
+# import datetime
+# from io import BytesIO
 
-import requests
-import pytesseract
-from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
-from dotenv import load_dotenv
-from PIL import Image, UnidentifiedImageError
-from pdf2image import convert_from_bytes
+# import requests
+# import pytesseract
+# from flask import Flask, request, jsonify, send_from_directory
+# from flask_cors import CORS
+# from dotenv import load_dotenv
+# from PIL import Image, UnidentifiedImageError
+# from pdf2image import convert_from_bytes
 
-# Local imports
+# # Local imports
 
-# Load environment variables BEFORE reading any of them.
-load_dotenv()
+# # Load environment variables BEFORE reading any of them.
+# load_dotenv()
 
-current_datetime = datetime.datetime.now()
-modelLock = threading.Lock()
-imgPath = os.environ.get("imgPath")
-labelName = json.loads(os.environ.get("labelList"))
-modelPath = os.environ.get("modelExtraction")
-imgDummy = os.environ.get("rawImage")
-imgCropped = os.environ.get("croppedImage")
-labeledImgPath = os.environ.get("imgBBPath")
-labeledFoldPath = os.environ.get("foldPath")
-popplerPath = os.environ.get("popplerRootPath")
+# current_datetime = datetime.datetime.now()
+# modelLock = threading.Lock()
+# imgPath = os.environ.get("imgPath")
+# labelName = json.loads(os.environ.get("labelList"))
+# modelPath = os.environ.get("modelExtraction")
+# imgDummy = os.environ.get("rawImage")
+# imgCropped = os.environ.get("croppedImage")
+# labeledImgPath = os.environ.get("imgBBPath")
+# labeledFoldPath = os.environ.get("foldPath")
+# popplerPath = os.environ.get("popplerRootPath")
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
+# logging.basicConfig(level=logging.INFO,
+#                     format="%(asctime)s - %(levelname)s - %(message)s")
+# logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
-CORS(app)
+# app = Flask(__name__)
+# CORS(app)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UI_FILE = "index.html"
-
-
-# ---------------------------------------------------------------- UI
-@app.route("/")
-def home():
-    return "alive"
+# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# UI_FILE = "index.html"
 
 
+# # ---------------------------------------------------------------- UI
 
 # @app.route("/")
 # def home():
@@ -147,7 +142,23 @@ def home():
 #     return jsonify(result)
 
 
+# if __name__ == "__main__":
+#     # docManager()
+#     # port = int(os.environ.get("PORT") or 9988)
+#     app.run(host="0.0.0.0",port=9988)
+
+
+import os
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "alive"
+
 if __name__ == "__main__":
-    # docManager()
-    # port = int(os.environ.get("PORT") or 9988)
-    app.run(host="0.0.0.0",port=9988)
+    port = int(os.environ.get("PORT", 9988))
+    print("PORT env is:", os.environ.get("PORT"), flush=True)
+    print("binding to 0.0.0.0:", port, flush=True)
+    app.run(host="0.0.0.0", port=port)

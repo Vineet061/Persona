@@ -4,17 +4,9 @@ pillow
 flask-cors
 python-dotenv
 numpy
-opencv-python-headless
 easyocr
 matplotlib
 pytesseract
 tensorflow
-Augmentor
-celery
 requests
-boto3
-pdf2image
-langgraph
 pdfplumber
-inngest 
-openai-agents
