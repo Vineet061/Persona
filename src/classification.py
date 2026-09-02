@@ -7,9 +7,8 @@ import uuid
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+import onnxruntime as ort
 import pytesseract
-from tensorflow.keras.models import load_model
-from tensorflow.keras.utils import img_to_array
 from ultralytics import YOLO
 
 logging.basicConfig(level=logging.INFO)
@@ -94,19 +93,22 @@ class ModelLoader:
     def _load_config(self):
         """Use the bundled project files directly from disk."""
         self.project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        self.model_local_path = os.environ.get("model") or os.path.join(self.project_root, "model_weights.h5")
-        self.updated_local_path = os.environ.get("modelNewweight") or os.path.join(self.project_root, "updated.weights.h5")
+        self.model_local_path = os.environ.get("model") or os.path.join(self.project_root, "model_weights.onnx")
+        self.updated_local_path = os.environ.get("modelNewweight") or os.path.join(self.project_root, "updated.weights.onnx")
         self.detection_local_path = os.environ.get("detectionPath") or os.path.join(self.project_root, "best.pt")
         self.localization_local_path = os.environ.get("localizationPath") or os.path.join(self.project_root, "localization.pt")
 
         self.classes = classes
 
     def _load_model(self):
-        """Load classification models strictly from local project files."""
+        """Load the document classifier with ONNX Runtime."""
         try:
             if self.model_local_path and os.path.exists(self.model_local_path):
-                logger.info(f"Loading base classifier from local file: {self.model_local_path}")
-                self.model = load_model(self.model_local_path)
+                logger.info(f"Loading ONNX classifier from local file: {self.model_local_path}")
+                self.model = ort.InferenceSession(
+                    self.model_local_path,
+                    providers=["CPUExecutionProvider"],
+                )
                 logger.info("Base classifier loaded")
             else:
                 raise FileNotFoundError(f"Classifier model not found at {self.model_local_path}")
@@ -119,8 +121,11 @@ class ModelLoader:
                 current = os.path.abspath(self.model_local_path)
                 candidate = os.path.abspath(self.updated_local_path)
                 if candidate != current:
-                    logger.info(f"Loading updated classifier from local file: {self.updated_local_path}")
-                    self.model_update_weight = load_model(self.updated_local_path)
+                    logger.info(f"Loading updated ONNX classifier from local file: {self.updated_local_path}")
+                    self.model_update_weight = ort.InferenceSession(
+                        self.updated_local_path,
+                        providers=["CPUExecutionProvider"],
+                    )
                     logger.info("Updated classifier loaded")
                 else:
                     self.model_update_weight = None
@@ -189,13 +194,19 @@ class ModelLoader:
                 f"threshold={BLUR_THRESHOLD})"
             )
 
-        img_array = img_to_array(img).astype("float32")
+        img_array = np.asarray(img, dtype=np.float32)
         img_array = np.expand_dims(img_array, axis=0)
 
-        # Predict using a batch-shaped input, matching Keras Sequential expectations.
-        predictions = model.predict(img_array, verbose=0)
-        predicted_class = classes[np.argmax(predictions[0])]
-        confidence = round(100 * (np.max(predictions[0])), 2)
+        input_name = model.get_inputs()[0].name
+        predictions = model.run(None, {input_name: img_array})[0]
+        predicted_index = int(np.argmax(predictions[0]))
+        if predicted_index >= len(classes):
+            raise RuntimeError(
+                f"Classifier returned class index {predicted_index}, "
+                f"but only {len(classes)} class names are configured."
+            )
+        predicted_class = classes[predicted_index]
+        confidence = round(100 * float(np.max(predictions[0])), 2)
 
         return predicted_class, confidence
         

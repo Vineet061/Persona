@@ -6,6 +6,6 @@ python-dotenv
 numpy
 matplotlib
 pytesseract
-tensorflow
+onnxruntime
 requests
 
