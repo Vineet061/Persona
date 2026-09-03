@@ -1,6 +1,7 @@
 from src.classification import *
 
 import threading, os, uuid, time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 import pytesseract
 from PIL import Image
 import cv2
@@ -39,6 +40,39 @@ current_datetime = datetime.datetime.now()
 # Largest edge we feed to the models. Full-resolution phone photos are several
 # thousand pixels wide and cost far more CPU than they add in accuracy.
 MAX_INPUT_SIDE = 1600
+
+# Hard ceiling on the localization stage. Past this we give up on the bounding box
+# and fall back to the whole image, which is the same path taken when the model
+# legitimately finds nothing.
+LOCALIZATION_TIMEOUT = int(os.environ.get("localizationTimeout") or 45)
+LABEL_TIMEOUT = int(os.environ.get("labelTimeout") or 60)
+
+# Escape hatch: set skipLocalization=1 to bypass the stage entirely. Useful for
+# confirming whether the rest of the pipeline completes without it.
+SKIP_LOCALIZATION = os.environ.get("skipLocalization", "").lower() in ("1", "true", "yes")
+
+_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="infer")
+
+
+def _run_with_timeout(fn, *args, timeout=45, skip=False):
+    """Run fn in a worker thread; return None if it times out or raises.
+
+    NOTE: on timeout the worker keeps running in the background — Python cannot
+    kill a thread. This bounds how long the REQUEST waits, not how long the work
+    takes. If the stage is exhausting memory rather than merely being slow, this
+    will not save the process.
+    """
+    if skip:
+        print(f"[PERF] {getattr(fn, '__name__', fn)} skipped by config", flush=True)
+        return None
+    try:
+        return _executor.submit(fn, *args).result(timeout=timeout)
+    except FuturesTimeout:
+        print(f"[WARN] {getattr(fn, '__name__', fn)} exceeded {timeout}s — abandoning", flush=True)
+        return None
+    except Exception as exc:
+        print(f"[WARN] {getattr(fn, '__name__', fn)} failed: {exc}", flush=True)
+        return None
 
 
 def extract_look_pytessrect(imgCropped):
@@ -159,18 +193,25 @@ def execution(inputImg, startingTime, doc_data, docType):
 
     # predicted class and docType comp here
     doc_data["validationResult"] = (doc_data["predicted_class"] == docType)
-    print(doc_data,"This sit the doc data")
+
     print(doc_data["validationResult"], "This is the validation result", flush=True)
     if doc_data["validationResult"] is True:
 
-        print("Coming in this loopppppppp")
         _t = time.time()
-        imgSaveResult = model_loader.localization_BB(inputImg)
+        imgSaveResult = _run_with_timeout(
+            model_loader.localization_BB, inputImg,
+            timeout=LOCALIZATION_TIMEOUT, skip=SKIP_LOCALIZATION,
+        )
         print(f"[PERF] localization_BB: {time.time() - _t:.1f}s", flush=True)
 
-        labelBB = imgSaveResult.boxes.xyxy.tolist()
-        labelData = imgSaveResult.boxes.cls.tolist()
-        labelConf = imgSaveResult.boxes.conf.tolist()
+        if imgSaveResult is None:
+            # Timed out, skipped, or errored. Fall through to the no-boxes branch,
+            # which crops nothing and passes the whole image on.
+            labelBB = []
+        else:
+            labelBB = imgSaveResult.boxes.xyxy.tolist()
+            labelData = imgSaveResult.boxes.cls.tolist()
+            labelConf = imgSaveResult.boxes.conf.tolist()
 
         if len(labelBB) != 0:
             cropped_image = inputImg.crop(labelBB[0])
@@ -188,10 +229,31 @@ def execution(inputImg, startingTime, doc_data, docType):
             img_current = Image.open("output.jpg")
 
             _t = time.time()
-            imgSave, bbImgPath = model_loader.predict_BB_label(img_current, request_id)
+            _labelResult = _run_with_timeout(
+                model_loader.predict_BB_label, img_current, request_id,
+                timeout=LABEL_TIMEOUT,
+            )
             print(f"[PERF] predict_BB_label: {time.time() - _t:.1f}s", flush=True)
 
             imageResized = img_current
+
+            if _labelResult is None:
+                # Without label boxes there is nothing to OCR. Report the
+                # identification, which did succeed, rather than hanging.
+                with open("json_data/" + str(json_filename) + ".json", 'w') as json_file:
+                    json.dump(json_data2, json_file, indent=4)
+                return ({
+                    "docDetail": {
+                        "type": predictedClass,
+                        "confidence": str(confidence),
+                        "processDuration": int(valTime * 1000),
+                        "validationResult": True,
+                    },
+                    "status": "failed",
+                    "message": "Identification successful, but field detection timed out. Try a smaller image.",
+                })
+
+            imgSave, bbImgPath = _labelResult
 
             labelBB = imgSave.boxes.xyxy.tolist()
             labelData = imgSave.boxes.cls.tolist()
