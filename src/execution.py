@@ -1,8 +1,7 @@
 from src.classification import *
 
-import threading,os,uuid
+import threading, os, uuid, time
 import pytesseract
-import threading,os
 from PIL import Image
 import cv2
 from dotenv import load_dotenv
@@ -12,17 +11,35 @@ import datetime
 load_dotenv()
 modelLock = threading.Lock()
 imgPath = os.environ.get("imgPath")
-labelName = json.loads(os.environ.get("labelList"))
+
+# Was: json.loads(os.environ.get("labelList")) — raises TypeError at import time
+# whenever the env var is absent, which is the case on any host without the local
+# .env file. Fall back to the known label order instead.
+_rawLabelList = os.environ.get("labelList")
+try:
+    labelName = json.loads(_rawLabelList) if _rawLabelList else ["uid", "dob", "name", "gender"]
+except (TypeError, ValueError):
+    labelName = ["uid", "dob", "name", "gender"]
+
 imgDummy = os.environ.get("rawImage")
 imgCropped = os.environ.get("croppedImage")
 tesseractLoc = os.environ.get("tesseractPath")
 labeledImgPath = os.environ.get("imgBBPath")
-labeledFoldPath = os.environ.get("foldPath")
+labeledFoldPath = os.environ.get("foldPath") or "imgBB/"
 portNumber = os.environ.get("portNum")
 
-pytesseract.pytesseract.tesseract_cmd = tesseractLoc
+# Only override the tesseract binary if the configured path actually exists. The
+# value in .env is a Windows path and meaningless on a Linux container — there we
+# want whatever "tesseract" is on PATH.
+if tesseractLoc and os.path.exists(tesseractLoc):
+    pytesseract.pytesseract.tesseract_cmd = tesseractLoc
+
 current_datetime = datetime.datetime.now()
-modelLock = threading.Lock()
+
+# Largest edge we feed to the models. Full-resolution phone photos are several
+# thousand pixels wide and cost far more CPU than they add in accuracy.
+MAX_INPUT_SIDE = 1600
+
 
 def extract_look_pytessrect(imgCropped):
     try:
@@ -31,26 +48,17 @@ def extract_look_pytessrect(imgCropped):
         return lines
     except Exception as e:
         return f"Error in extract_look_pytessrect: {str(e)}"
-    
-
-def predict_BB(model_path,image_path):
-  model = YOLO(model_path)
-  results = model.predict(image_path)
-  result = results[0]
-  plotted_img = result.plot()
-
-  
 
 
-#   image_name = image_path.split("/")[-1]
-#   image_firstname = image_name.split(".")[0]
+def _downscale(img):
+    """Cap the longest edge at MAX_INPUT_SIDE, preserving aspect ratio."""
+    if max(img.size) <= MAX_INPUT_SIDE:
+        return img
+    ratio = MAX_INPUT_SIDE / max(img.size)
+    newSize = (int(img.width * ratio), int(img.height * ratio))
+    print(f"[PERF] downscaling input {img.size} -> {newSize}", flush=True)
+    return img.resize(newSize, Image.LANCZOS)
 
-#   BB_img_name = "BB_"+image_name
-
-#   plt.imsave("1234.jpg",plotted_img)
-  return(result)
-
-print("Check-1")
 
 def detect_rotation_angle(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -59,7 +67,7 @@ def detect_rotation_angle(image):
     edges = cv2.Canny(gray, 50, 150)
 
     # Hough Line Transform
-    lines = cv2.HoughLines(edges, 1, np.pi / 180, 200)      # Hough Transform used to detect lines in the image, which help in determining the orientation in the docx. 
+    lines = cv2.HoughLines(edges, 1, np.pi / 180, 200)      # Hough Transform used to detect lines in the image, which help in determining the orientation in the docx.
     # rho- Distance from origin, theta - angle of the line.
 
     angles = []
@@ -94,42 +102,43 @@ def rotate_image(image, angle):
     return cv2.warpAffine(image, M, (new_w, new_h))
 
 
-def correct_orientation(image,doc_data):
+def correct_orientation(image, doc_data):
     angle = detect_rotation_angle(image)
-    if abs(angle)>10:
+    if abs(angle) > 10:
         print(f"Detected angle: {angle}")
         doc_data["img_rotation_angle"] = int(angle)
 
-        if angle==0:
-            # image1 = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        if angle == 0:
             h, w = image.shape[:2]
-            if h>w:
+            if h > w:
                 print("90 degree")
                 image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
-            elif w>h or w==h:
+            elif w > h or w == h:
                 print("0")
-            
 
         corrected = rotate_image(image, angle)
 
         return corrected
     else:
-        print("The angle of image is",angle)
+        print("The angle of image is", angle)
         return image
 
 
-
-def execution(inputImg,startingTime,doc_data,docType):
-    json_data2={}
+def execution(inputImg, startingTime, doc_data, docType):
+    json_data2 = {}
     json_filename = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     if not os.path.exists("json_data"):
         os.makedirs("json_data")
+    os.makedirs(labeledFoldPath, exist_ok=True)
 
     request_id = uuid.uuid4().hex
 
+    inputImg = _downscale(inputImg)
+
     model_loader = ModelLoader()
 
+    _t = time.time()
     try:
         predictedClass, confidence = model_loader.predict(inputImg)
     except BlurredImageError as e:
@@ -139,57 +148,56 @@ def execution(inputImg,startingTime,doc_data,docType):
             "message": "The image is too blurry to process. Please retake a clearer photo and try again.",
             "errorMessage": str(e),
         })
+    print(f"[PERF] classify: {time.time() - _t:.1f}s", flush=True)
 
     valProcessingTime = datetime.datetime.utcnow()
     valTime = (valProcessingTime - startingTime).total_seconds()
-    print(predictedClass,confidence,"This is the answer")
+    print(predictedClass, confidence, "This is the answer")
 
     doc_data["predicted_class"] = predictedClass
     doc_data["confidence"] = str(confidence)
-    print("12")
-
-
-
 
     # predicted class and docType comp here
     doc_data["validationResult"] = (doc_data["predicted_class"] == docType)
 
-    print(doc_data["validationResult"],"This is the validation result")
+    print(doc_data["validationResult"], "This is the validation result", flush=True)
     if doc_data["validationResult"] is True:
 
-        # checkkkkkkkkkkkkkkkkkkkkkkkkkkkk
-
+        _t = time.time()
         imgSaveResult = model_loader.localization_BB(inputImg)
+        print(f"[PERF] localization_BB: {time.time() - _t:.1f}s", flush=True)
+
         labelBB = imgSaveResult.boxes.xyxy.tolist()
         labelData = imgSaveResult.boxes.cls.tolist()
-        labelConf = imgSaveResult.boxes.conf.tolist() 
+        labelConf = imgSaveResult.boxes.conf.tolist()
 
-        
-
-        if len(labelBB)!=0:
+        if len(labelBB) != 0:
             cropped_image = inputImg.crop(labelBB[0])
             cropped_image.save("cropped_image.jpg")
             image = cv2.imread("cropped_image.jpg")
-            corrected = correct_orientation(image,json_data2)
+            corrected = correct_orientation(image, json_data2)
             cv2.imwrite("output.jpg", corrected)
         else:
-            imgg = inputImg.save("cropped_image.jpg")
+            inputImg.save("cropped_image.jpg")
             image = cv2.imread("cropped_image.jpg")
-            corrected = correct_orientation(image,json_data2)
+            corrected = correct_orientation(image, json_data2)
             cv2.imwrite("output.jpg", corrected)
         #---------------------------------------------------------------------------
         if predictedClass == "AADHAAR":
             img_current = Image.open("output.jpg")
+
+            _t = time.time()
             imgSave, bbImgPath = model_loader.predict_BB_label(img_current, request_id)
-            # imageResized = inputImg.copy()
+            print(f"[PERF] predict_BB_label: {time.time() - _t:.1f}s", flush=True)
+
             imageResized = img_current
-            
+
             labelBB = imgSave.boxes.xyxy.tolist()
             labelData = imgSave.boxes.cls.tolist()
             labelConf = imgSave.boxes.conf.tolist()
-                            
-            if len(labelConf)>0:
-                labelList = list(map(int,labelData))
+
+            if len(labelConf) > 0:
+                labelList = list(map(int, labelData))
 
                 unique_values_with_highest_accuracy = {}
                 for value, accuracy, listBB in zip(labelList, labelConf, labelBB):
@@ -200,18 +208,19 @@ def execution(inputImg,startingTime,doc_data,docType):
                                         reverse=True)
 
                 result = [value for value, _ in sorted_result]
-                conf = [data['accuracy'] for _,data in sorted_result]
-                values = [data['l'] for _,data in sorted_result]
+                conf = [data['accuracy'] for _, data in sorted_result]
+                values = [data['l'] for _, data in sorted_result]
 
                 mainLt = result
                 mainConf = conf
                 mainBB = values
 
-                jsonData={}
+                jsonData = {}
                 if not mainLt:
                     print(f"[EXTRACTION] Failed to detect any labels for {predictedClass}. mainLt={mainLt}")
-                    return({"message":"Model couldn't able to extract the text.","type":predictedClass})
+                    return({"message": "Model couldn't able to extract the text.", "type": predictedClass})
 
+                _t = time.time()
                 for m_range in range(len(mainLt)):
                     classNameInt = int(mainLt[m_range])
 
@@ -222,10 +231,9 @@ def execution(inputImg,startingTime,doc_data,docType):
                     jKey = labelName[classNameInt]
 
                     conf_key = mainConf[m_range]
-                    json_data2[jKey+" detection-confidence"] = conf_key
+                    json_data2[jKey + " detection-confidence"] = conf_key
 
                     cropped_image = imageResized.crop(mainBB[m_range])
-                    # cropped_image.save(imgCropped)
 
                     reader = model_loader.get_ocr_reader()
                     field_text = reader.image_to_string(np.array(cropped_image), config="--psm 6")
@@ -238,90 +246,64 @@ def execution(inputImg,startingTime,doc_data,docType):
                     final_data = " ".join(result)
                     if final_data.strip():
                         jsonData[jKey] = final_data
+                print(f"[PERF] ocr ({len(mainLt)} fields): {time.time() - _t:.1f}s", flush=True)
 
                 if not jsonData:
                     print(f"[EXTRACTION] No valid mapped OCR fields extracted. mainLt={mainLt}, labelName={labelName}")
                     full_text = model_loader.get_ocr_reader().image_to_string(np.array(imageResized), config="--psm 6")
                     print(f"[EXTRACTION] Full-image OCR fallback text: {full_text}")
-                    return({"message":"Model couldn't able to extract the text.","type":predictedClass})
+                    return({"message": "Model couldn't able to extract the text.", "type": predictedClass})
 
                 print(f"[EXTRACTION] extracted jsonData before post-processing: {jsonData}")
-                        
-                            
+
                 # gender
                 if "gender" in jsonData.keys():
                     genderDetail = jsonData["gender"]
-                    if len(genderDetail)>5:
+                    if len(genderDetail) > 5:
                         jsonData["gender"] = "female"
-                    elif len(genderDetail)<5:
+                    elif len(genderDetail) < 5:
                         jsonData["gender"] = "male"
-                
+
                 if "dob" in jsonData.keys():
                     dobDetail = jsonData["dob"]
 
-                    if len(dobDetail)<6:
+                    if len(dobDetail) < 6:
                         jsonData["dob"] = dobDetail
                     else:
                         try:
                             dobYear = dobDetail[-4:]
                             first_num = dobYear[0]
                             if first_num in ("8", "6", "3"):
-                                dobYear[0]="2"
+                                dobYear[0] = "2"
                             elif first_num in ("4", "7"):
-                                dobYear[0]=="1"
+                                dobYear[0] == "1"
                             dobDate = dobDetail[0:2]
 
-                            if (dobDetail[2]=="/") or (dobDetail[2]=="1"):
+                            if (dobDetail[2] == "/") or (dobDetail[2] == "1"):
                                 dobMonth = dobDetail[3:5]
-                            elif dobDetail[2]=="0":
+                            elif dobDetail[2] == "0":
                                 dobMonth = dobDetail[2:4]
                             else:
                                 dobMonth = "09"
 
-                            final_date = dobDate+"/"+dobMonth+"/"+dobYear
+                            final_date = dobDate + "/" + dobMonth + "/" + dobYear
                             jsonData["dob"] = final_date
                         except Exception as e:
                             # Don't let an unexpected OCR format crash the whole
                             # extraction — keep the raw OCR'd value instead.
                             print(f"DOB post-processing failed, keeping raw OCR value: {e}")
-                        
-
-
-                        
-                # #uid
-                # uid = jsonData["uid"]
-                # newUid = ""
-                # print(len(jsonData["uid"]))
-                # for num in uid:
-                #     if num!=" ":
-                #         newUid+=num
-                # if len(jsonData["uid"])<12:
-                #     jsonData["remark"] = "detect uid does not have total 12 numbers"
-                #     # return ({"status":"failed","message":"Kindly provide clear image,given image either not an Aadhar or it is blurry", "confidence":str(confidence),"type":predictedClass})
-                
-                # jsonData["uid"] = newUid
-
 
                 if "uid" in jsonData:
                     uid = jsonData["uid"]
                     newUid = "".join(num for num in uid if num != " ")
                     if len(uid) < 12:
                         jsonData["remark"] = "detect uid does not have total 12 numbers"
-                        # return ({"status":"failed","message":"Kindly provide clear image,given image either not an Aadhar or it is blurry", "confidence":str(confidence),"type":predictedClass})
                     jsonData["uid"] = newUid
                 else:
                     # The localization model didn't detect a uid field on this card —
                     # this used to raise an unhandled KeyError further down.
                     jsonData["uid"] = ""
                     jsonData["remark"] = "Could not extract the ID number from the document"
-
-
-
-
-                # deleting junk
-                # os.remove(imgDummy)
-                # os.remove(imgCropped)
-                # os.remove(imgPath) 
 
                 timestamp = datetime.datetime.now().strftime("%m-%d-%Y_%H-%M-%S")
 
@@ -334,73 +316,49 @@ def execution(inputImg,startingTime,doc_data,docType):
                 except OSError as e:
                     print(f"Could not persist annotated detection image: {e}")
 
-
-                # #filename
-                # if (0 not in mainLt) and len(mainLt)!=0:
-                #     labelIndexName = labelName[int(mainLt[0])]
-                        
-                #     os.rename(labeledImgPath,labeledFoldPath+jsonData[labelIndexName]+"_"+timestamp+".png")
-                # if os.path.exists (labeledFoldPath+jsonData["uid"]+".png"):
-                #     timestamp = datetime.now().strftime("%m-%d-%Y_%H-%M-%S")
-                        
-                #     os.rename(labeledImgPath,labeledFoldPath+jsonData["uid"]+"_"+timestamp+".png")
-                # else:
-                #     os.rename(labeledImgPath,labeledFoldPath+jsonData["uid"]+"_"+timestamp+".png")
-
                 extractionProcessingTime = datetime.datetime.utcnow()
-                extractionTimeTaken = (extractionProcessingTime - valProcessingTime).total_seconds()*100
-                totalTime = extractionTimeTaken+valTime
+                extractionTimeTaken = (extractionProcessingTime - valProcessingTime).total_seconds() * 100
+                totalTime = extractionTimeTaken + valTime
                 mainJson = {}
                 mainJson["totalProcessTime"] = int(totalTime)
 
-                
-
-                jsonData["processDuration"] = int(extractionTimeTaken*1000) 
-                # dobDetail["type"] = predictedClass
+                jsonData["processDuration"] = int(extractionTimeTaken * 1000)
                 mainJson["confidence"] = str(confidence)
-                mainJson["processDuration"] = int(valTime*1000)
+                mainJson["processDuration"] = int(valTime * 1000)
                 mainJson["data"] = jsonData
                 mainJson["type"] = predictedClass
                 mainJson["validationResult"] = True
-                print(doc_data,mainJson,"this is the doc_data")
+                print(doc_data, mainJson, "this is the doc_data")
 
-                with open("json_data/"+str(json_filename)+".json", 'w') as json_file:
+                with open("json_data/" + str(json_filename) + ".json", 'w') as json_file:
                     json.dump(json_data2, json_file, indent=4)
-                print(f"[EXTRACTION] final payload: {mainJson}")
-                return ({"docDetail":mainJson,"type":predictedClass,"status":"Success","message":"Successfully identified & extracted."})
+                print(f"[EXTRACTION] final payload: {mainJson}", flush=True)
+                return ({"docDetail": mainJson, "type": predictedClass, "status": "Success", "message": "Successfully identified & extracted."})
             else:
-                mainJson = {}  
-                # os.remove(imgDummy)
+                mainJson = {}
                 mainJson["type"] = predictedClass
                 mainJson["confidence"] = str(confidence)
-                mainJson["processDuration"] = int(valTime*1000)
+                mainJson["processDuration"] = int(valTime * 1000)
                 mainJson["validationResult"] = True
 
-                # Testing 
-
-                with open("json_data/"+str(json_filename)+".json", 'w') as json_file:
+                with open("json_data/" + str(json_filename) + ".json", 'w') as json_file:
                     json.dump(json_data2, json_file, indent=4)
-                print(f"[EXTRACTION] extraction failed payload: {mainJson}")
-                return ({"docDetail":mainJson,"status":"failed","message":"Identification successful, extraction failed. Model could not able to locate the id number"})
+                print(f"[EXTRACTION] extraction failed payload: {mainJson}", flush=True)
+                return ({"docDetail": mainJson, "status": "failed", "message": "Identification successful, extraction failed. Model could not able to locate the id number"})
 
-        elif predictedClass=="UNKNOWN":
-            # os.remove(imgPath)
-            validationTime = int(valTime*1000)
+        elif predictedClass == "UNKNOWN":
+            validationTime = int(valTime * 1000)
 
             startingTime = str(startingTime)
-            with open("json_data/"+str(json_filename)+".json", 'w') as json_file:
+            with open("json_data/" + str(json_filename) + ".json", 'w') as json_file:
                 json.dump(json_data2, json_file, indent=4)
 
-            return ({"status":"Success","type":"unidentified","confidence":str(confidence),"processDuration":validationTime,"message":"Identification successful","validationResult": True})
+            return ({"status": "Success", "type": "unidentified", "confidence": str(confidence), "processDuration": validationTime, "message": "Identification successful", "validationResult": True})
         else:
-            # os.remove(imgPath)
-            validationTime = int(valTime*1000)
-            with open("json_data/"+str(json_filename)+".json", 'w') as json_file:
+            validationTime = int(valTime * 1000)
+            with open("json_data/" + str(json_filename) + ".json", 'w') as json_file:
                 json.dump(json_data2, json_file, indent=4)
-            return ({"status":"Success","type":predictedClass,"confidence":str(confidence),"processDuration":validationTime,"message":"Identification successful","validationResult": True})
-        
+            return ({"status": "Success", "type": predictedClass, "confidence": str(confidence), "processDuration": validationTime, "message": "Identification successful", "validationResult": True})
 
     else:
-        return ({"status":"Success","type":doc_data["predicted_class"],"confidence":doc_data["confidence"],"message":"Identification successful","validationResult": False})
-
-
+        return ({"status": "Success", "type": doc_data["predicted_class"], "confidence": doc_data["confidence"], "message": "Identification successful", "validationResult": False})
