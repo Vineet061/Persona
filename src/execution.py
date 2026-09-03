@@ -159,10 +159,11 @@ def execution(inputImg, startingTime, doc_data, docType):
 
     # predicted class and docType comp here
     doc_data["validationResult"] = (doc_data["predicted_class"] == docType)
-
+    print(doc_data,"This sit the doc data")
     print(doc_data["validationResult"], "This is the validation result", flush=True)
     if doc_data["validationResult"] is True:
 
+        print("Coming in this loopppppppp")
         _t = time.time()
         imgSaveResult = model_loader.localization_BB(inputImg)
         print(f"[PERF] localization_BB: {time.time() - _t:.1f}s", flush=True)
